@@ -199,6 +199,7 @@ vi.mock('$components/editor', async () => {
     getMentions: () => ({ users: new Set<string>(), room: undefined }),
     getPrevWorldRange: () => undefined,
     isEmptyEditor: (editor: any) => textOf(editor.children).trim() === '',
+    markEventConsumedByHost: vi.fn(),
     moveCursor: vi.fn(),
     plainToEditorInput: (text: string) => [{ type: 'paragraph', children: [{ text }] }],
     replaceWithElement: vi.fn(),
@@ -561,6 +562,10 @@ function RoomInputHarness({
     return new ProseMirrorEditorController();
   }, []);
   const [, setEditorRevision] = useState(0);
+  // Mirror the real editor's onDocumentChange so the mocked CustomEditor
+  // re-reads editor.children when the controller's document changes (e.g.
+  // clear() on submit), not only on button-triggered harness re-renders.
+  useEffect(() => editor.subscribe(() => setEditorRevision((prev) => prev + 1)), [editor]);
   const fileDropContainerRef = useMemo(() => ({ current: null }), []);
   const [, setMsgDraft] = useAtom(roomIdToMsgDraftAtomFamily(room.roomId));
   const [, setSelectedFiles] = useAtom(roomIdToUploadItemsAtomFamily(room.roomId));

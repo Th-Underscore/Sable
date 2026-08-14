@@ -67,6 +67,7 @@ import {
   BEGINNING_AUTOCOMPLETE_PREFIXES,
   MarkdownFormattingToolbarBottom,
   MarkdownFormattingToolbarToggle,
+  markEventConsumedByHost,
 } from '$components/editor';
 import { stripMarkdownEscapesForHiddenPreviews } from './message/hiddenLinkPreviews';
 import { plainToEditorInput } from '$components/editor/input';
@@ -1735,6 +1736,7 @@ export const RoomInput = forwardRef<HTMLDivElement, RoomInputProps>(
 
             if (selectedItem) {
               evt.preventDefault();
+              markEventConsumedByHost(evt.nativeEvent);
               selectedItem.click();
               return;
             }
@@ -1754,6 +1756,7 @@ export const RoomInput = forwardRef<HTMLDivElement, RoomInputProps>(
           !isComposing(evt)
         ) {
           evt.preventDefault();
+          markEventConsumedByHost(evt.nativeEvent);
           submit().catch((error) => {
             log.error('submit failed', { roomId }, error);
           });

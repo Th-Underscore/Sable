@@ -1,9 +1,10 @@
 import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Selection } from 'prosemirror-state';
+import { undoDepth } from 'prosemirror-history';
 import type { EditorView } from 'prosemirror-view';
 import type { EditorDocument } from './model';
-import { ProseMirrorEditable } from './ProseMirrorEditable';
+import { markEventConsumedByHost, ProseMirrorEditable } from './ProseMirrorEditable';
 import { ProseMirrorEditorController } from './prosemirrorController';
 import { BlockType } from './types';
 
@@ -37,6 +38,8 @@ const mount = (initial: EditorDocument = doc('')) => {
     view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
   return { caretToEnd, controller, editable, view };
 };
+
+const typeText = (view: EditorView, text: string) => view.dispatch(view.state.tr.insertText(text));
 
 describe('ProseMirrorEditorController empty-document invariant', () => {
   it('reports empty after the user deletes every character', () => {
@@ -177,16 +180,19 @@ describe('placeholder', () => {
 });
 
 describe('Enter handling', () => {
-  it('does not split the paragraph when the host treats Enter as send', () => {
+  it('does not split the paragraph when the host consumes Enter', () => {
     const controller = new ProseMirrorEditorController(doc('hello'));
-    const onKeyDown = vi.fn<(event: { preventDefault: () => void }) => void>((event) =>
-      event.preventDefault()
+    const onKeyDown = vi.fn<(event: { preventDefault: () => void; nativeEvent: Event }) => void>(
+      (event) => {
+        event.preventDefault();
+        markEventConsumedByHost(event.nativeEvent);
+      }
     );
     const { container } = render(
       <ProseMirrorEditable controller={controller} onKeyDown={onKeyDown} />
     );
 
-    fireEvent.keyDown(container.querySelector('.ProseMirror')!, { key: 'Enter' });
+    fireEvent.keyDown(container.querySelector('.ProseMirror')!, { key: 'Enter', keyCode: 13 });
 
     expect(onKeyDown).toHaveBeenCalled();
     expect(controller.getDocument()).toEqual(doc('hello'));
@@ -213,7 +219,7 @@ describe('Enter handling', () => {
   it('leaves an in-flight IME composition alone', () => {
     const { controller, editable } = mount(doc('hello'));
 
-    fireEvent.keyDown(editable, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(editable, { key: 'Enter', keyCode: 13, isComposing: true });
 
     expect(controller.getDocument()).toEqual(doc('hello'));
   });
@@ -246,7 +252,7 @@ describe('clipboard', () => {
 });
 
 describe('ProseMirrorEditorController clear', () => {
-  it('keeps undo working while composing, then wipes it once cleared', () => {
+  it('keeps undo working while composing and restores the cleared draft once undone', () => {
     const { controller } = mount();
 
     controller.insertText('hello');
@@ -256,10 +262,10 @@ describe('ProseMirrorEditorController clear', () => {
     controller.insertText('draft');
     controller.clear();
     controller.undo();
-    expect(controller.getDocument()).toEqual(doc(''));
+    expect(controller.getDocument()).toEqual(doc('draft'));
   });
 
-  it('reuses the focused editable so rebuilding state does not steal focus', () => {
+  it('reuses the focused editable so clearing does not steal focus', () => {
     const { controller, editable } = mount(doc('draft'));
     editable.focus();
 
@@ -341,5 +347,96 @@ describe('Android backspace fallback', () => {
     act(() => vi.advanceTimersByTime(50));
 
     expect(controller.getDocument()).toEqual(doc('hi'));
+  });
+});
+
+describe('ProseMirrorEditorController undo history across sends', () => {
+  it('records the send reset as its own undo event', () => {
+    const { controller, view } = mount(doc(''));
+    typeText(view, 'first');
+    expect(undoDepth(view.state)).toBe(1);
+
+    controller.clear();
+    expect(controller.getText()).toBe('');
+    expect(undoDepth(view.state)).toBe(2);
+  });
+
+  it('restores a sent message with a single undo after sending', () => {
+    const { controller, view } = mount(doc(''));
+    typeText(view, 'first');
+
+    controller.clear();
+    expect(controller.getText()).toBe('');
+
+    controller.undo();
+    expect(controller.getText()).toBe('first');
+  });
+
+  it('walks back through previously sent messages, skipping the empty send checkpoints', () => {
+    const { controller, view } = mount(doc(''));
+    typeText(view, 'first');
+    controller.clear();
+    typeText(view, ' second');
+    controller.clear();
+    expect(controller.getText()).toBe('');
+
+    controller.undo();
+    expect(controller.getText()).toBe(' second');
+    controller.undo();
+    expect(controller.getText()).toBe('first');
+    controller.undo();
+    expect(controller.getText()).toBe('');
+
+    controller.redo();
+    expect(controller.getText()).toBe('first');
+    controller.redo();
+    expect(controller.getText()).toBe(' second');
+    controller.redo();
+    expect(controller.getText()).toBe('');
+  });
+
+  it('still walks within a draft before jumping to the previous message', () => {
+    const { controller, view } = mount(doc(''));
+    typeText(view, 'first');
+    controller.clear();
+    typeText(view, ' second');
+    controller.clear();
+    expect(controller.getText()).toBe('');
+
+    controller.undo();
+    expect(controller.getText()).toBe(' second');
+    controller.undo();
+    expect(controller.getText()).toBe('first');
+  });
+
+  it('redoes the send reset after undoing it', () => {
+    const { controller, view } = mount(doc(''));
+    typeText(view, 'first');
+    controller.clear();
+
+    controller.undo();
+    expect(controller.getText()).toBe('first');
+
+    controller.redo();
+    expect(controller.getText()).toBe('');
+  });
+
+  it('walks send -> new draft on undo and back on redo', () => {
+    const { controller, view } = mount(doc(''));
+    typeText(view, 'first');
+    controller.clear();
+    typeText(view, 'second');
+
+    controller.undo();
+    expect(controller.getText()).toBe('first');
+
+    controller.undo();
+    expect(controller.getText()).toBe('');
+
+    controller.redo();
+    expect(controller.getText()).toBe('first');
+
+    controller.redo();
+    expect(controller.getText()).toBe('second');
   });
 });

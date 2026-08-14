@@ -1,5 +1,5 @@
 import { baseKeymap, splitBlock } from 'prosemirror-commands';
-import { history, redo, undo } from 'prosemirror-history';
+import { closeHistory, history, redo, redoDepth, undo, undoDepth } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import { EditorState, Selection, TextSelection, type Transaction } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
@@ -80,6 +80,9 @@ export class ProseMirrorEditorController {
   private listeners = new Set<(document: EditorDocument) => void>();
   private renderContext: EditorRenderContext = defaultEditorRenderContext;
   private view: EditorView | undefined;
+  // The next user transaction after a document replacement starts a fresh undo
+  // group, so typing after a send does not merge with the send-clear.
+  private closeHistoryPending = false;
 
   constructor(initialDocument: EditorDocument = emptyEditorDocument()) {
     this.document = structuredClone(initialDocument);
@@ -157,7 +160,10 @@ export class ProseMirrorEditorController {
       );
       // Put the caret after the new content rather than wherever the old ended.
       transaction.setSelection(Selection.atEnd(transaction.doc));
+      // A document replacement is its own undo event.
+      closeHistory(transaction);
       this.view.dispatch(transaction);
+      this.closeHistoryPending = true;
       return;
     }
     this.notify();
@@ -174,7 +180,11 @@ export class ProseMirrorEditorController {
       plugins: [
         beginCommandPlugin,
         history(),
-        keymap({ 'Mod-z': undo, 'Mod-Shift-z': redo, 'Mod-y': redo }),
+        keymap({
+          'Mod-z': () => this.undo(),
+          'Mod-Shift-z': () => this.redo(),
+          'Mod-y': () => this.redo(),
+        }),
         // Enter is withheld on purpose: the host decides send vs newline.
         // Binding it here also splits the paragraph, on top of whatever it did.
         keymap(Object.fromEntries(Object.entries(baseKeymap).filter(([key]) => key !== 'Enter'))),
@@ -229,6 +239,10 @@ export class ProseMirrorEditorController {
         dispatchTransaction: (transaction: Transaction) => {
           const view = this.view;
           if (!view) return;
+          if (this.closeHistoryPending && transaction.docChanged) {
+            closeHistory(transaction);
+            this.closeHistoryPending = false;
+          }
           view.updateState(view.state.apply(transaction));
           if (transaction.docChanged) {
             this.document = fromProseMirrorDocument(view.state.doc);
@@ -247,22 +261,42 @@ export class ProseMirrorEditorController {
     this.view?.focus();
   }
 
-  /** Drops the undo stack too: cleared content was sent, consumed, or abandoned. */
   clear(): void {
     this.setDocument(emptyEditorDocument());
-    if (this.view) this.view.updateState(this.createState());
   }
 
   blur(): void {
     (this.view?.dom as HTMLElement | undefined)?.blur();
   }
 
-  undo(): void {
-    if (this.view) undo(this.view.state, this.view.dispatch);
+  undo(): boolean {
+    return this.undoRedo(undoDepth, undo);
   }
 
-  redo(): void {
-    if (this.view) redo(this.view.state, this.view.dispatch);
+  redo(): boolean {
+    return this.undoRedo(redoDepth, redo);
+  }
+
+  // Undo skips the empty-document checkpoints a send leaves behind, so one
+  // press moves draft-to-draft instead of landing on a blank box.
+  private undoRedo(
+    depth: (state: EditorState) => number,
+    step: (state: EditorState, dispatch?: (tr: Transaction) => void) => boolean
+  ): boolean {
+    const view = this.view;
+    if (!view) return false;
+    let didApply = false;
+    for (let i = 0; i < 100; i += 1) {
+      const state = view.state;
+      if (depth(state) === 0) break;
+      const docSize = state.doc.content.size;
+      step(state, view.dispatch);
+      didApply = true;
+      const nextState = view.state;
+      if (!isProseMirrorDocumentEmpty(nextState.doc) || nextState.doc.content.size === docSize)
+        break;
+    }
+    return didApply;
   }
 
   insertText(text: string): void {
