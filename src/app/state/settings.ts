@@ -151,6 +151,7 @@ export interface Settings {
   legacyUsernameColor: boolean;
 
   mediaAutoLoad: boolean;
+  shiftClickToInstaDelete: boolean;
   multiplePreviews: boolean;
   bundledPreview: boolean;
   urlPreview: boolean;
@@ -331,6 +332,7 @@ export const defaultSettings: Settings = {
   hideMembershipEvents: false,
   hideNickAvatarEvents: true,
   mediaAutoLoad: true,
+  shiftClickToInstaDelete: false,
   multiplePreviews: true,
   bundledPreview: true,
   urlPreview: true,

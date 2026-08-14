@@ -53,6 +53,7 @@ export const settingsLinkFocusIdsBySection: Record<SettingsSectionId, readonly s
     'right-swipe-action',
     'session-replay',
     'capture-diagnostics',
+    'shift-click-insta-delete',
     'show-hidden-events',
     'hidden-event-edits',
     'show-redacted-message-tombstones',

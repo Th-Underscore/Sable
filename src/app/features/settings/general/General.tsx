@@ -794,6 +794,10 @@ function Messages() {
     'hideNickAvatarEvents'
   );
   const [mediaAutoLoad, setMediaAutoLoad] = useSetting(settingsAtom, 'mediaAutoLoad');
+  const [shiftClickToInstaDelete, setShiftClickToInstaDelete] = useSetting(
+    settingsAtom,
+    'shiftClickToInstaDelete'
+  );
   const [showHiddenEvents, setShowHiddenEvents] = useSetting(settingsAtom, 'showHiddenEvents');
   const [showTombstoneEvents, setShowTombstoneEvents] = useSetting(
     settingsAtom,
@@ -868,6 +872,13 @@ function Messages() {
         focusId="disable-media-auto-load"
         value={!mediaAutoLoad}
         onChange={(v) => setMediaAutoLoad(!v)}
+      />
+      <SettingToggle
+        title="Hold Shift to Instantly Delete Messages"
+        focusId="shift-click-insta-delete"
+        description="When enabled, holding Shift while clicking Delete in a message's options deletes it immediately, skipping the confirmation dialog."
+        value={shiftClickToInstaDelete}
+        onChange={setShiftClickToInstaDelete}
       />
       <SettingToggle
         title="Hide Membership Change"

@@ -12,13 +12,18 @@ import {
   Button,
   Spinner,
   MenuItem,
+  Tooltip,
   config,
   color,
 } from 'folds';
-import { menuIcon, Trash, X } from '$components/icons/phosphor';
+import { menuIcon, Trash, X, Info } from '$components/icons/phosphor';
+import { TooltipProvider } from '$components/overlay-stack';
 import { useMatrixClient } from '$hooks/useMatrixClient';
 import { AsyncStatus, useAsyncCallback } from '$hooks/useAsyncCallback';
 import { modalAtom, ModalType } from '$state/modal';
+import { useSetting } from '$state/hooks/settings';
+import { settingsAtom } from '$state/settings';
+import { showToast } from '$state/toast';
 import * as css from '$features/room/message/styles.css';
 import { createDebugLogger } from '$utils/debugLogger';
 import * as Sentry from '@sentry/react';
@@ -34,7 +39,9 @@ export function MessageDeleteItem({
   mEvent: MatrixEvent;
   closeMenu?: () => void;
 }) {
+  const mx = useMatrixClient();
   const setModal = useSetAtom(modalAtom);
+  const [shiftClickToInstaDelete] = useSetting(settingsAtom, 'shiftClickToInstaDelete');
 
   return (
     <MenuItem
@@ -46,6 +53,17 @@ export function MessageDeleteItem({
       onClick={(e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        if (shiftClickToInstaDelete && e.shiftKey) {
+          const eventId = mEvent.getId();
+          if (eventId) {
+            debugLog.info('ui', 'Insta-deleting message', { roomId: room.roomId, eventId });
+            mx.redactEvent(room.roomId, eventId).catch(() => {
+              showToast('Failed to delete message! Please try again.');
+            });
+          }
+          closeMenu?.();
+          return;
+        }
         setModal({
           type: ModalType.Delete,
           room,
@@ -69,6 +87,7 @@ type MessageDeleteInternalProps = {
 
 export function MessageDeleteInternal({ room, mEvent, onClose }: MessageDeleteInternalProps) {
   const mx = useMatrixClient();
+  const [shiftClickToInstaDelete] = useSetting(settingsAtom, 'shiftClickToInstaDelete');
 
   const [deleteState, deleteMessage] = useAsyncCallback(
     useCallback(
@@ -133,22 +152,53 @@ export function MessageDeleteInternal({ room, mEvent, onClose }: MessageDeleteIn
         direction="Column"
         gap="400"
       >
-        <Text priority="400">
-          This action is irreversible! Are you sure that you want to delete this message?
-        </Text>
-        <Box direction="Column" gap="100">
-          <Text size="L400">
-            Reason{' '}
-            <Text as="span" size="T200">
-              (optional)
+        <Box direction="Column" gap="200">
+          <Box gap="200" alignItems="Center">
+            <Text priority="400">
+              This action is irreversible! Are you sure that you want to delete this message?
             </Text>
-          </Text>
-          <Input name="reasonInput" variant="Background" />
-          {deleteState.status === AsyncStatus.Error && (
-            <Text style={{ color: color.Critical.Main }} size="T300">
-              Failed to delete message! Please try again.
+            <TooltipProvider
+              delay={400}
+              position="Top"
+              align="Center"
+              tooltip={
+                <Tooltip>
+                  <Text size="T200">
+                    {shiftClickToInstaDelete
+                      ? 'Hold Shift and click Delete to delete instantly without this confirmation.'
+                      : 'You can enable holding Shift to instantly delete messages in Settings.'}
+                  </Text>
+                </Tooltip>
+              }
+            >
+              {(triggerRef) => (
+                <IconButton
+                  ref={triggerRef}
+                  size="300"
+                  radii="300"
+                  type="button"
+                  aria-label="Shift-click delete"
+                  onClick={(e) => e.preventDefault()}
+                >
+                  {menuIcon(Info)}
+                </IconButton>
+              )}
+            </TooltipProvider>
+          </Box>
+          <Box direction="Column" gap="100">
+            <Text size="L400">
+              Reason{' '}
+              <Text as="span" size="T200">
+                (optional)
+              </Text>
             </Text>
-          )}
+            <Input name="reasonInput" variant="Background" />
+            {deleteState.status === AsyncStatus.Error && (
+              <Text style={{ color: color.Critical.Main }} size="T300">
+                Failed to delete message! Please try again.
+              </Text>
+            )}
+          </Box>
         </Box>
         <Button
           type="submit"
