@@ -138,6 +138,17 @@
     word-spacing: inherit;
   }
 
+  /* Hide the native password-reveal eye injected by Chromium/Edge WebView2:
+     Sable's PasswordInput already renders its own toggle. */
+  input[type='password']::-ms-reveal,
+  input[type='password']::-ms-clear {
+    display: none;
+  }
+
+  input[type='password']::-internal-reveal-button {
+    display: none !important;
+  }
+
   audio:not([controls]) {
     /* eslint-disable-next-line css/no-important */
     display: none !important;
